@@ -40,22 +40,9 @@
 #if NVT_TOUCH_ESD_PROTECT
 #include <linux/jiffies.h>
 #endif /* #if NVT_TOUCH_ESD_PROTECT */
-
-#ifdef CONFIG_KERNEL_CUSTOM_FACTORY
-#include "../lct_tp_work.h"
-#endif
-#include "../lct_tp_gesture.h"
-#include "../lct_tp_grip_area.h"
-
-/* add verify LCD by wanghan start */
-extern char g_lcd_id[128];
-/* add verify LCD by wanghan end */
-/* add touchpad information by wanghan start */
-extern int lct_nvt_tp_info_node_init(void);
-/* add touchpad information by wanghan end */
-/* add resume work by wanghan start */
-static struct work_struct g_resume_work;
-/* add resume work by wanghan end */
+/* add tp vendor information by yangjiangzhu  2018/3/19 start */
+extern char g_lcd_id[128];  
+/* add tp vendor information by yangjiangzhu  2018/3/19 end */
 
 #if NVT_TOUCH_ESD_PROTECT
 static struct delayed_work nvt_esd_check_work;
@@ -76,32 +63,12 @@ extern int32_t nvt_mp_proc_init(void);
 
 struct nvt_ts_data *ts;
 
-
-struct g_nvt_data {
-	bool valid;
-	bool usb_plugin;
-	struct work_struct nvt_usb_plugin_work;
-};
-struct g_nvt_data g_nvt = {0};
-EXPORT_SYMBOL(g_nvt);
-
 static struct workqueue_struct *nvt_wq;
 
 #if BOOT_UPDATE_FIRMWARE
 static struct workqueue_struct *nvt_fwu_wq;
 extern void Boot_Update_Firmware(struct work_struct *work);
 #endif
-
-#ifdef CONFIG_KERNEL_CUSTOM_FACTORY
-static int lct_tp_work_node_callback(bool flag);
-#endif
-static int lct_tp_gesture_node_callback(bool flag);
-static int lct_tp_get_screen_angle_callback(void);
-static int lct_tp_set_screen_angle_callback(unsigned int angle);
-
-/* add resume work by wanghan start */
-static void do_nvt_ts_resume_work(struct work_struct *work);
-/* add resume work by wanghan end */
 
 #if defined(CONFIG_FB)
 static int fb_notifier_callback(struct notifier_block *self, unsigned long event, void *data);
@@ -137,16 +104,13 @@ const uint16_t gesture_key_array[] = {
 };
 
 bool enable_gesture_mode = false;
-EXPORT_SYMBOL(enable_gesture_mode);
 bool delay_gesture = false;
 bool suspend_state = false;
 #define WAKEUP_OFF 4
 #define WAKEUP_ON 5
-#define ENABLE_TOUCH_SZIE 0
 
 int nvt_gesture_switch(struct input_dev *dev, unsigned int type, unsigned int code, int value)
 {
-	LOG_ENTRY();
 	if (type == EV_SYN && code == SYN_CONFIG)
 	{
 		if (suspend_state)
@@ -165,52 +129,81 @@ int nvt_gesture_switch(struct input_dev *dev, unsigned int type, unsigned int co
 			enable_gesture_mode  = true;
 		}
 	}
-	LOG_DONE();
 	return 0;
 }
 
 static ssize_t double_tap_show(struct kobject *kobj,
-                   struct kobj_attribute *attr, char *buf)
+			       struct kobj_attribute *attr, char *buf)
 {
-    return sprintf(buf, "%d\n", enable_gesture_mode);
+	return sprintf(buf, "%d\n", enable_gesture_mode);
 }
 
 static ssize_t double_tap_store(struct kobject *kobj,
-                struct kobj_attribute *attr, const char *buf,
-                size_t count)
+				struct kobj_attribute *attr, const char *buf,
+				size_t count)
 {
-    int rc, val;
-    
-    rc = kstrtoint(buf, 10, &val);
-    if (rc)
-    return -EINVAL;
-    
-    enable_gesture_mode = !!val;
-    return count;
+	int rc, val;
+
+	rc = kstrtoint(buf, 10, &val);
+	if (rc)
+		return -EINVAL;
+
+	enable_gesture_mode = !!val;
+	return count;
 }
 
 static struct tp_common_ops double_tap_ops = {
-    .show = double_tap_show,
-    .store = double_tap_store
+	.show = double_tap_show,
+	.store = double_tap_store
 };
+
+static int nvt_gesture_read(struct seq_file *file, void *v)
+{
+	seq_printf(file, "%d", enable_gesture_mode);
+	return 0;
+}
+
+static int nvt_gesture_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, nvt_gesture_read, inode);
+}
+
+static ssize_t nvt_gesture_write(struct file *file, const char __user *buf,
+			 size_t count, loff_t *ppos)
+{
+	uint8_t str;
+	if(copy_from_user(&str, buf, 1)); // ignore
+	enable_gesture_mode = (str == '1');
+	return 1;
+}
+
+static const struct file_operations nvt_gesture_fops = {
+	.owner = THIS_MODULE,
+	.open = nvt_gesture_open,
+	.write = nvt_gesture_write,
+	.release = single_release,
+	.read = seq_read,
+	.llseek = seq_lseek,
+};
+#define NVT_GESTURE_NAME "nvt_wake_gesture"
+
 #endif
 
 static uint8_t bTouchIsAwake = 0;
 
 /*******************************************************
 Description:
-Novatek touchscreen i2c read function.
+	Novatek touchscreen i2c read function.
 
 return:
-Executive outcomes. 2---succeed. -5---I/O error
- *******************************************************/
+	Executive outcomes. 2---succeed. -5---I/O error
+*******************************************************/
 int32_t CTP_I2C_READ(struct i2c_client *client, uint16_t address, uint8_t *buf, uint16_t len)
 {
 	struct i2c_msg msgs[2];
 	int32_t ret = -1;
 	int32_t retries = 0;
 
-	LOG_ENTRY();
 	msgs[0].flags = !I2C_M_RD;
 	msgs[0].addr  = address;
 	msgs[0].len   = 1;
@@ -232,24 +225,22 @@ int32_t CTP_I2C_READ(struct i2c_client *client, uint16_t address, uint8_t *buf, 
 		ret = -EIO;
 	}
 
-	LOG_DONE();
 	return ret;
 }
 
 /*******************************************************
 Description:
-Novatek touchscreen i2c write function.
+	Novatek touchscreen i2c write function.
 
 return:
-Executive outcomes. 1---succeed. -5---I/O error
- *******************************************************/
+	Executive outcomes. 1---succeed. -5---I/O error
+*******************************************************/
 int32_t CTP_I2C_WRITE(struct i2c_client *client, uint16_t address, uint8_t *buf, uint16_t len)
 {
 	struct i2c_msg msg;
 	int32_t ret = -1;
 	int32_t retries = 0;
 
-	LOG_ENTRY();
 	msg.flags = !I2C_M_RD;
 	msg.addr  = address;
 	msg.len   = len;
@@ -266,69 +257,63 @@ int32_t CTP_I2C_WRITE(struct i2c_client *client, uint16_t address, uint8_t *buf,
 		ret = -EIO;
 	}
 
-	LOG_DONE();
 	return ret;
 }
 
 
 /*******************************************************
 Description:
-Novatek touchscreen reset MCU then into idle mode
-function.
+	Novatek touchscreen reset MCU then into idle mode
+    function.
 
 return:
-n.a.
- *******************************************************/
+	n.a.
+*******************************************************/
 void nvt_sw_reset_idle(void)
 {
 	uint8_t buf[4]={0};
 
-	LOG_ENTRY();
 
 	buf[0]=0x00;
 	buf[1]=0xA5;
 	CTP_I2C_WRITE(ts->client, I2C_HW_Address, buf, 2);
 
 	msleep(15);
-	LOG_DONE();
 }
 
 /*******************************************************
 Description:
-Novatek touchscreen reset MCU (boot) function.
+	Novatek touchscreen reset MCU (boot) function.
 
 return:
-n.a.
- *******************************************************/
+	n.a.
+*******************************************************/
 void nvt_bootloader_reset(void)
 {
 	uint8_t buf[8] = {0};
 
-	LOG_ENTRY();
-	//---write i2c cmds to reset---
+
 	buf[0] = 0x00;
 	buf[1] = 0x69;
 	CTP_I2C_WRITE(ts->client, I2C_HW_Address, buf, 2);
 
 
 	msleep(35);
-	LOG_DONE();
 }
 
 /*******************************************************
 Description:
-Novatek touchscreen clear FW status function.
+	Novatek touchscreen clear FW status function.
 
 return:
-Executive outcomes. 0---succeed. -1---fail.
- *******************************************************/
+	Executive outcomes. 0---succeed. -1---fail.
+*******************************************************/
 int32_t nvt_clear_fw_status(void)
 {
 	uint8_t buf[8] = {0};
 	int32_t i = 0;
 	const int32_t retry = 20;
 
-	LOG_ENTRY();
 	for (i = 0; i < retry; i++) {
 
 		buf[0] = 0xFF;
@@ -354,28 +339,25 @@ int32_t nvt_clear_fw_status(void)
 
 	if (i >= retry) {
 		NVT_ERR("failed, i=%d, buf[1]=0x%02X\n", i, buf[1]);
-		LOG_DONE();
 		return -1;
 	} else {
-		LOG_DONE();
 		return 0;
 	}
 }
 
 /*******************************************************
 Description:
-Novatek touchscreen check FW status function.
+	Novatek touchscreen check FW status function.
 
 return:
-Executive outcomes. 0---succeed. -1---failed.
- *******************************************************/
+	Executive outcomes. 0---succeed. -1---failed.
+*******************************************************/
 int32_t nvt_check_fw_status(void)
 {
 	uint8_t buf[8] = {0};
 	int32_t i = 0;
 	const int32_t retry = 50;
 
-	LOG_ENTRY();
 	for (i = 0; i < retry; i++) {
 
 		buf[0] = 0xFF;
@@ -396,32 +378,29 @@ int32_t nvt_check_fw_status(void)
 
 	if (i >= retry) {
 		NVT_ERR("failed, i=%d, buf[1]=0x%02X\n", i, buf[1]);
-		LOG_DONE();
 		return -1;
 	} else {
-		LOG_DONE();
 		return 0;
 	}
 }
 
 /*******************************************************
 Description:
-Novatek touchscreen check FW reset state function.
+	Novatek touchscreen check FW reset state function.
 
 return:
-Executive outcomes. 0---succeed. -1---failed.
- *******************************************************/
+	Executive outcomes. 0---succeed. -1---failed.
+*******************************************************/
 int32_t nvt_check_fw_reset_state(RST_COMPLETE_STATE check_reset_state)
 {
 	uint8_t buf[8] = {0};
 	int32_t ret = 0;
 	int32_t retry = 0;
 
-	LOG_ENTRY();
 	while (1) {
 		msleep(10);
 
-		//---read reset state---
+
 		buf[0] = EVENT_MAP_RESET_COMPLETE;
 		buf[1] = 0x00;
 		CTP_I2C_READ(ts->client, I2C_FW_Address, buf, 6);
@@ -439,24 +418,22 @@ int32_t nvt_check_fw_reset_state(RST_COMPLETE_STATE check_reset_state)
 		}
 	}
 
-	LOG_DONE();
 	return ret;
 }
 
 /*******************************************************
 Description:
-Novatek touchscreen get novatek project id information
-function.
+	Novatek touchscreen get novatek project id information
+	function.
 
 return:
-Executive outcomes. 0---success. -1---fail.
- *******************************************************/
+	Executive outcomes. 0---success. -1---fail.
+*******************************************************/
 int32_t nvt_read_pid(void)
 {
 	uint8_t buf[3] = {0};
 	int32_t ret = 0;
 
-	LOG_ENTRY();
 
 	buf[0] = 0xFF;
 	buf[1] = (ts->mmap->EVENT_BUF_ADDR >> 16) & 0xFF;
@@ -473,25 +450,28 @@ int32_t nvt_read_pid(void)
 
 	NVT_LOG("PID=%04X\n", ts->nvt_pid);
 
-	LOG_DONE();
 	return ret;
 }
 
 /*******************************************************
 Description:
-Novatek touchscreen get firmware related information
-function.
+	Novatek touchscreen get firmware related information
+	function.
 
 return:
-Executive outcomes. 0---success. -1---fail.
- *******************************************************/
+	Executive outcomes. 0---success. -1---fail.
+*******************************************************/
 int32_t nvt_get_fw_info(void)
 {
 	uint8_t buf[64] = {0};
 	uint32_t retry_count = 0;
 	int32_t ret = 0;
+/* add tp-fw information by yangjiangzhu  2018/3/12 start */
+#if	NVT_READ_TP_FW
+	char fw_version[64];
+#endif
+/* add tp-fw information by yangjiangzhu  2018/3/12 end */
 
-	LOG_ENTRY();
 info_retry:
 
 	buf[0] = 0xFF;
@@ -533,27 +513,40 @@ info_retry:
 	} else {
 		ret = 0;
 	}
+/* add tp-fw and vendor information by yangjiangzhu  2018/3/19 start */
+#if	NVT_READ_TP_FW
+		memset(fw_version, 0, sizeof(fw_version));
+		if (strstr(g_lcd_id,"shenchao nt36672a fhdplus video mode dsi panel") != NULL) {
+				sprintf(fw_version, "[FW]0x%02x,[IC]nvt36672_a", ts->fw_ver);
+				init_tp_fm_info(0, fw_version, "shenchao");
+			}
+			else {
+					sprintf(fw_version, "[FW]0x%02x,[IC]nvt36672_a", ts->fw_ver);
+					init_tp_fm_info(0, fw_version, "tianma");
+				 }
+#endif
+/* add tp-fw and vendor information by yangjiangzhu  2018/3/19 end */
+printk("yjz nvt_get_fw_info 1 \n");
 
 	nvt_read_pid();
-
-	LOG_DONE();
+	
 	return ret;
 }
 
 /*******************************************************
   Create Device Node (Proc Entry)
- *******************************************************/
+*******************************************************/
 #if NVT_TOUCH_PROC
 static struct proc_dir_entry *NVT_proc_entry;
 #define DEVICE_NAME	"NVTflash"
 
 /*******************************************************
 Description:
-Novatek touchscreen /proc/NVTflash read function.
+	Novatek touchscreen /proc/NVTflash read function.
 
 return:
-Executive outcomes. 2---succeed. -5,-14---failed.
- *******************************************************/
+	Executive outcomes. 2---succeed. -5,-14---failed.
+*******************************************************/
 static ssize_t nvt_flash_read(struct file *file, char __user *buff, size_t count, loff_t *offp)
 {
 	uint8_t str[68] = {0};
@@ -561,7 +554,6 @@ static ssize_t nvt_flash_read(struct file *file, char __user *buff, size_t count
 	int32_t retries = 0;
 	int8_t i2c_wr = 0;
 
-	LOG_ENTRY();
 	if (count > sizeof(str)) {
 		NVT_ERR("error count=%zu\n", count);
 		return -EFAULT;
@@ -631,16 +623,15 @@ static ssize_t nvt_flash_read(struct file *file, char __user *buff, size_t count
 
 /*******************************************************
 Description:
-Novatek touchscreen /proc/NVTflash open function.
+	Novatek touchscreen /proc/NVTflash open function.
 
 return:
-Executive outcomes. 0---succeed. -12---failed.
- *******************************************************/
+	Executive outcomes. 0---succeed. -12---failed.
+*******************************************************/
 static int32_t nvt_flash_open(struct inode *inode, struct file *file)
 {
 	struct nvt_flash_data *dev;
 
-	LOG_ENTRY();
 	dev = kmalloc(sizeof(struct nvt_flash_data), GFP_KERNEL);
 	if (dev == NULL) {
 		NVT_ERR("Failed to allocate memory for nvt flash data\n");
@@ -650,26 +641,23 @@ static int32_t nvt_flash_open(struct inode *inode, struct file *file)
 	rwlock_init(&dev->lock);
 	file->private_data = dev;
 
-	LOG_DONE();
 	return 0;
 }
 
 /*******************************************************
 Description:
-Novatek touchscreen /proc/NVTflash close function.
+	Novatek touchscreen /proc/NVTflash close function.
 
 return:
-Executive outcomes. 0---succeed.
- *******************************************************/
+	Executive outcomes. 0---succeed.
+*******************************************************/
 static int32_t nvt_flash_close(struct inode *inode, struct file *file)
 {
 	struct nvt_flash_data *dev = file->private_data;
 
-	LOG_ENTRY();
 	if (dev)
 		kfree(dev);
 
-	LOG_DONE();
 	return 0;
 }
 
@@ -682,15 +670,14 @@ static const struct file_operations nvt_flash_fops = {
 
 /*******************************************************
 Description:
-Novatek touchscreen /proc/NVTflash initial function.
+	Novatek touchscreen /proc/NVTflash initial function.
 
 return:
-Executive outcomes. 0---succeed. -12---failed.
- *******************************************************/
+	Executive outcomes. 0---succeed. -12---failed.
+*******************************************************/
 static int32_t nvt_flash_proc_init(void)
 {
-	LOG_ENTRY();
-	NVT_proc_entry = proc_create(DEVICE_NAME, 0444, NULL, &nvt_flash_fops);
+	NVT_proc_entry = proc_create(DEVICE_NAME, 0444, NULL,&nvt_flash_fops);
 	if (NVT_proc_entry == NULL) {
 		NVT_ERR("Failed!\n");
 		return -ENOMEM;
@@ -698,11 +685,10 @@ static int32_t nvt_flash_proc_init(void)
 		NVT_LOG("Succeeded!\n");
 	}
 
-	NVT_LOG("=============================================================\n");
+	NVT_LOG("============================================================\n");
 	NVT_LOG("Create /proc/NVTflash\n");
 	NVT_LOG("============================================================\n");
 
-	LOG_DONE();
 	return 0;
 }
 #endif
@@ -731,18 +717,17 @@ static struct wake_lock gestrue_wakelock;
 
 /*******************************************************
 Description:
-Novatek touchscreen wake up gesture key report function.
+	Novatek touchscreen wake up gesture key report function.
 
 return:
-n.a.
- *******************************************************/
+	n.a.
+*******************************************************/
 void nvt_ts_wakeup_gesture_report(uint8_t gesture_id, uint8_t *data)
 {
 	uint32_t keycode = 0;
 	uint8_t func_type = data[2];
 	uint8_t func_id = data[3];
 
-	LOG_ENTRY();
 	/* support fw specifal data protocol */
 	if ((gesture_id == DATA_PROTOCOL) && (func_type == FUNCPAGE_GESTURE)) {
 		gesture_id = func_id;
@@ -754,60 +739,60 @@ void nvt_ts_wakeup_gesture_report(uint8_t gesture_id, uint8_t *data)
 	NVT_LOG("gesture_id = %d\n", gesture_id);
 
 	switch (gesture_id) {
-	case GESTURE_WORD_C:
-		NVT_LOG("Gesture : Word-C.\n");
-		keycode = gesture_key_array[0];
-		break;
-	case GESTURE_WORD_W:
-		NVT_LOG("Gesture : Word-W.\n");
-		keycode = gesture_key_array[1];
-		break;
-	case GESTURE_WORD_V:
-		NVT_LOG("Gesture : Word-V.\n");
-		keycode = gesture_key_array[2];
-		break;
-	case GESTURE_DOUBLE_CLICK:
-		NVT_LOG("Gesture : Double Click.\n");
-		keycode = gesture_key_array[3];
-		break;
-	case GESTURE_WORD_Z:
-		NVT_LOG("Gesture : Word-Z.\n");
-		keycode = gesture_key_array[4];
-		break;
-	case GESTURE_WORD_M:
-		NVT_LOG("Gesture : Word-M.\n");
-		keycode = gesture_key_array[5];
-		break;
-	case GESTURE_WORD_O:
-		NVT_LOG("Gesture : Word-O.\n");
-		keycode = gesture_key_array[6];
-		break;
-	case GESTURE_WORD_e:
-		NVT_LOG("Gesture : Word-e.\n");
-		keycode = gesture_key_array[7];
-		break;
-	case GESTURE_WORD_S:
-		NVT_LOG("Gesture : Word-S.\n");
-		keycode = gesture_key_array[8];
-		break;
-	case GESTURE_SLIDE_UP:
-		NVT_LOG("Gesture : Slide UP.\n");
-		keycode = gesture_key_array[9];
-		break;
-	case GESTURE_SLIDE_DOWN:
-		NVT_LOG("Gesture : Slide DOWN.\n");
-		keycode = gesture_key_array[10];
-		break;
-	case GESTURE_SLIDE_LEFT:
-		NVT_LOG("Gesture : Slide LEFT.\n");
-		keycode = gesture_key_array[11];
-		break;
-	case GESTURE_SLIDE_RIGHT:
-		NVT_LOG("Gesture : Slide RIGHT.\n");
-		keycode = gesture_key_array[12];
-		break;
-	default:
-		break;
+		case GESTURE_WORD_C:
+			NVT_LOG("Gesture : Word-C.\n");
+			keycode = gesture_key_array[0];
+			break;
+		case GESTURE_WORD_W:
+			NVT_LOG("Gesture : Word-W.\n");
+			keycode = gesture_key_array[1];
+			break;
+		case GESTURE_WORD_V:
+			NVT_LOG("Gesture : Word-V.\n");
+			keycode = gesture_key_array[2];
+			break;
+		case GESTURE_DOUBLE_CLICK:
+			NVT_LOG("Gesture : Double Click.\n");
+			keycode = gesture_key_array[3];
+			break;
+		case GESTURE_WORD_Z:
+			NVT_LOG("Gesture : Word-Z.\n");
+			keycode = gesture_key_array[4];
+			break;
+		case GESTURE_WORD_M:
+			NVT_LOG("Gesture : Word-M.\n");
+			keycode = gesture_key_array[5];
+			break;
+		case GESTURE_WORD_O:
+			NVT_LOG("Gesture : Word-O.\n");
+			keycode = gesture_key_array[6];
+			break;
+		case GESTURE_WORD_e:
+			NVT_LOG("Gesture : Word-e.\n");
+			keycode = gesture_key_array[7];
+			break;
+		case GESTURE_WORD_S:
+			NVT_LOG("Gesture : Word-S.\n");
+			keycode = gesture_key_array[8];
+			break;
+		case GESTURE_SLIDE_UP:
+			NVT_LOG("Gesture : Slide UP.\n");
+			keycode = gesture_key_array[9];
+			break;
+		case GESTURE_SLIDE_DOWN:
+			NVT_LOG("Gesture : Slide DOWN.\n");
+			keycode = gesture_key_array[10];
+			break;
+		case GESTURE_SLIDE_LEFT:
+			NVT_LOG("Gesture : Slide LEFT.\n");
+			keycode = gesture_key_array[11];
+			break;
+		case GESTURE_SLIDE_RIGHT:
+			NVT_LOG("Gesture : Slide RIGHT.\n");
+			keycode = gesture_key_array[12];
+			break;
+		default:
+			break;
 	}
 
 	if (keycode > 0) {
@@ -816,23 +801,21 @@ void nvt_ts_wakeup_gesture_report(uint8_t gesture_id, uint8_t *data)
 		input_report_key(ts->input_dev, keycode, 0);
 		input_sync(ts->input_dev);
 	}
-	LOG_DONE();
 }
 #endif
 
 /*******************************************************
 Description:
-Novatek touchscreen parse device tree function.
+	Novatek touchscreen parse device tree function.
 
 return:
-n.a.
- *******************************************************/
+	n.a.
+*******************************************************/
 #ifdef CONFIG_OF
 static void nvt_parse_dt(struct device *dev)
 {
 	struct device_node *np = dev->of_node;
 
-	LOG_ENTRY();
 #if NVT_TOUCH_SUPPORT_HW_RST
 	ts->reset_gpio = of_get_named_gpio_flags(np, "novatek,reset-gpio", 0, &ts->reset_flags);
 	NVT_LOG("novatek,reset-gpio=%d\n", ts->reset_gpio);
@@ -840,32 +823,28 @@ static void nvt_parse_dt(struct device *dev)
 	ts->irq_gpio = of_get_named_gpio_flags(np, "novatek,irq-gpio", 0, &ts->irq_flags);
 	NVT_LOG("novatek,irq-gpio=%d\n", ts->irq_gpio);
 
-	LOG_DONE();
 }
 #else
 static void nvt_parse_dt(struct device *dev)
 {
-	LOG_ENTRY();
 #if NVT_TOUCH_SUPPORT_HW_RST
 	ts->reset_gpio = NVTTOUCH_RST_PIN;
 #endif
 	ts->irq_gpio = NVTTOUCH_INT_PIN;
-	LOG_DONE();
 }
 #endif
 
 /*******************************************************
 Description:
-Novatek touchscreen config and request gpio
+	Novatek touchscreen config and request gpio
 
 return:
-Executive outcomes. 0---succeed. not 0---failed.
- *******************************************************/
+	Executive outcomes. 0---succeed. not 0---failed.
+*******************************************************/
 static int nvt_gpio_config(struct nvt_ts_data *ts)
 {
 	int32_t ret = 0;
 
-	LOG_ENTRY();
 #if NVT_TOUCH_SUPPORT_HW_RST
 	/* request RST-pin (Output/High) */
 	if (gpio_is_valid(ts->reset_gpio)) {
@@ -893,21 +872,18 @@ err_request_irq_gpio:
 	gpio_free(ts->reset_gpio);
 err_request_reset_gpio:
 #endif
-	LOG_DONE();
 	return ret;
 }
 
 #if NVT_TOUCH_ESD_PROTECT
 void nvt_esd_check_enable(uint8_t enable)
 {
-	LOG_ENTRY();
 	/* enable/disable esd check flag */
 	esd_check = enable;
 	/* update interrupt timer */
 	irq_timer = jiffies;
 	/* clear esd_retry counter, if protect function is enabled */
 	esd_retry = enable ? 0 : esd_retry;
-	LOG_DONE();
 }
 
 static uint8_t nvt_fw_recovery(uint8_t *point_data)
@@ -915,7 +891,6 @@ static uint8_t nvt_fw_recovery(uint8_t *point_data)
 	uint8_t i = 0;
 	uint8_t detected = true;
 
-	LOG_ENTRY();
 	/* check pattern */
 	for (i=1 ; i<7 ; i++) {
 		if (point_data[i] != 0x77) {
@@ -924,7 +899,6 @@ static uint8_t nvt_fw_recovery(uint8_t *point_data)
 		}
 	}
 
-	LOG_DONE();
 	return detected;
 }
 
@@ -932,7 +906,6 @@ static void nvt_esd_check_func(struct work_struct *work)
 {
 	unsigned int timer = jiffies_to_msecs(jiffies - irq_timer);
 
-	LOG_ENTRY();
 
 
 	if (esd_retry >= esd_retry_max)
@@ -950,18 +923,17 @@ static void nvt_esd_check_func(struct work_struct *work)
 
 	queue_delayed_work(nvt_esd_check_wq, &nvt_esd_check_work,
 			msecs_to_jiffies(NVT_TOUCH_ESD_CHECK_PERIOD));
-	LOG_DONE();
 }
 #endif /* #if NVT_TOUCH_ESD_PROTECT */
 
 #define POINT_DATA_LEN 65
 /*******************************************************
 Description:
-Novatek touchscreen work function.
+	Novatek touchscreen work function.
 
 return:
-n.a.
- *******************************************************/
+	n.a.
+*******************************************************/
 static void nvt_ts_work_func(struct work_struct *work)
 {
 	int32_t ret = -1;
@@ -978,7 +950,6 @@ static void nvt_ts_work_func(struct work_struct *work)
 	int32_t i = 0;
 	int32_t finger_cnt = 0;
 
-	LOG_ENTRY();
 	mutex_lock(&ts->lock);
 
 	ret = CTP_I2C_READ(ts->client, I2C_FW_Address, point_data, POINT_DATA_LEN + 1);
@@ -986,13 +957,13 @@ static void nvt_ts_work_func(struct work_struct *work)
 		NVT_ERR("CTP_I2C_READ failed.(%d)\n", ret);
 		goto XFER_ERROR;
 	}
-	/*
+/*
 	//--- dump I2C buf ---
 	for (i = 0; i < 10; i++) {
-	printk("%02X %02X %02X %02X %02X %02X  ", point_data[1+i*6], point_data[2+i*6], point_data[3+i*6], point_data[4+i*6], point_data[5+i*6], point_data[6+i*6]);
+		printk("%02X %02X %02X %02X %02X %02X  ", point_data[1+i*6], point_data[2+i*6], point_data[3+i*6], point_data[4+i*6], point_data[5+i*6], point_data[6+i*6]);
 	}
 	printk("\n");
-	*/
+*/
 
 #if NVT_TOUCH_ESD_PROTECT
 	if (nvt_fw_recovery(point_data)) {
@@ -1054,9 +1025,7 @@ static void nvt_ts_work_func(struct work_struct *work)
 
 			input_report_abs(ts->input_dev, ABS_MT_POSITION_X, input_x);
 			input_report_abs(ts->input_dev, ABS_MT_POSITION_Y, input_y);
-#if ENABLE_TOUCH_SZIE
 			input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, input_w);
-#endif
 			input_report_abs(ts->input_dev, ABS_MT_PRESSURE, input_p);
 
 #if MT_PROTOCOL_B
@@ -1072,9 +1041,7 @@ static void nvt_ts_work_func(struct work_struct *work)
 	for (i = 0; i < ts->max_touch_num; i++) {
 		if (press_id[i] != 1) {
 			input_mt_slot(ts->input_dev, i);
-#if ENABLE_TOUCH_SZIE
 			input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0);
-#endif
 			input_report_abs(ts->input_dev, ABS_MT_PRESSURE, 0);
 			input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, false);
 		}
@@ -1110,71 +1077,17 @@ XFER_ERROR:
 	enable_irq(ts->client->irq);
 
 	mutex_unlock(&ts->lock);
-	LOG_DONE();
 }
 
 /*******************************************************
 Description:
-Novatek touchscreen usb plugin work function.
+	External interrupt service routine.
 
 return:
-n.a.
- *******************************************************/
-static void nvt_ts_usb_plugin_work_func(struct work_struct *work)
-{
-	uint8_t buf[8] = {0};
-	int32_t ret = 0;
-
-	LOG_ENTRY();
-	if ( !bTouchIsAwake || (ts->touch_state != TOUCH_STATE_WORKING) ) {
-		NVT_ERR("tp is suspended or flashing, can not to set\n");
-		return;
-	}
-
-	NVT_LOG("++\n");
-	mutex_lock(&ts->lock);
-	NVT_LOG("usb_plugin = %d\n", g_nvt.usb_plugin);
-
-	msleep(35);
-
-
-	buf[0] = 0xFF;
-	buf[1] = (ts->mmap->EVENT_BUF_ADDR >> 16) & 0xFF;
-	buf[2] = (ts->mmap->EVENT_BUF_ADDR >> 8) & 0xFF;
-	ret = CTP_I2C_WRITE(ts->client, I2C_FW_Address, buf, 3);
-	if (ret < 0) {
-		NVT_ERR("Set event buffer index fail!\n");
-		goto exit;
-	}
-
-	buf[0] = EVENT_MAP_HOST_CMD;
-	if (g_nvt.usb_plugin)
-		buf[1] = 0x53;
-	else
-		buf[1] = 0x51;
-
-	ret = CTP_I2C_WRITE(ts->client, I2C_FW_Address, buf, 2);
-	if (ret < 0) {
-		NVT_ERR("Write pwr plug switch command fail!\n");
-		goto exit;
-	}
-
-exit:
-	mutex_unlock(&ts->lock);
-	NVT_LOG("--\n");
-	LOG_DONE();
-}
-
-/*******************************************************
-Description:
-External interrupt service routine.
-
-return:
-irq execute status.
- *******************************************************/
+	irq execute status.
+*******************************************************/
 static irqreturn_t nvt_ts_irq_handler(int32_t irq, void *dev_id)
 {
-	LOG_ENTRY();
 	disable_irq_nosync(ts->client->irq);
 
 #if WAKEUP_GESTURE
@@ -1185,23 +1098,21 @@ static irqreturn_t nvt_ts_irq_handler(int32_t irq, void *dev_id)
 
 	queue_work(nvt_wq, &ts->nvt_work);
 
-	LOG_DONE();
 	return IRQ_HANDLED;
 }
 
 /*******************************************************
 Description:
-Novatek touchscreen check and stop crc reboot loop.
+	Novatek touchscreen check and stop crc reboot loop.
 
 return:
-n.a.
- *******************************************************/
+	n.a.
+*******************************************************/
 void nvt_stop_crc_reboot(void)
 {
 	uint8_t buf[8] = {0};
 	int32_t retry = 0;
 
-	LOG_ENTRY();
 
 
 
@@ -1215,7 +1126,7 @@ void nvt_stop_crc_reboot(void)
 	CTP_I2C_READ(ts->client, I2C_BLDR_Address, buf, 4);
 
 	if ((buf[1] == 0xFC) ||
-			((buf[1] == 0xFF) && (buf[2] == 0xFF) && (buf[3] == 0xFF))) {
+		((buf[1] == 0xFF) && (buf[2] == 0xFF) && (buf[3] == 0xFF))) {
 
 
 		for (retry = 5; retry > 0; retry--) {
@@ -1231,7 +1142,7 @@ void nvt_stop_crc_reboot(void)
 			CTP_I2C_WRITE(ts->client, I2C_HW_Address, buf, 2);
 			msleep(1);
 
-			//---clear CRC_ERR_FLAG---
+
 			buf[0] = 0xFF;
 			buf[1] = 0x03;
 			buf[2] = 0xF1;
@@ -1258,17 +1169,16 @@ void nvt_stop_crc_reboot(void)
 			NVT_ERR("CRC auto reboot is not able to be stopped! buf[1]=0x%02X\n", buf[1]);
 	}
 
-	LOG_DONE();
 	return;
 }
 
 /*******************************************************
 Description:
-Novatek touchscreen check chip version trim function.
+	Novatek touchscreen check chip version trim function.
 
 return:
-Executive outcomes. 0---NVT IC. -1---not NVT IC.
- *******************************************************/
+	Executive outcomes. 0---NVT IC. -1---not NVT IC.
+*******************************************************/
 static int8_t nvt_ts_check_chip_ver_trim(void)
 {
 	uint8_t buf[8] = {0};
@@ -1278,7 +1188,6 @@ static int8_t nvt_ts_check_chip_ver_trim(void)
 	int32_t found_nvt_chip = 0;
 	int32_t ret = -1;
 
-	LOG_ENTRY();
 	nvt_bootloader_reset();
 
 
@@ -1304,11 +1213,11 @@ static int8_t nvt_ts_check_chip_ver_trim(void)
 		buf[6] = 0x00;
 		CTP_I2C_READ(ts->client, I2C_BLDR_Address, buf, 7);
 		NVT_LOG("buf[1]=0x%02X, buf[2]=0x%02X, buf[3]=0x%02X, buf[4]=0x%02X, buf[5]=0x%02X, buf[6]=0x%02X\n",
-				buf[1], buf[2], buf[3], buf[4], buf[5], buf[6]);
+			buf[1], buf[2], buf[3], buf[4], buf[5], buf[6]);
 
 
 		if ((buf[1] == 0xFC) ||
-				((buf[1] == 0xFF) && (buf[2] == 0xFF) && (buf[3] == 0xFF))) {
+			((buf[1] == 0xFF) && (buf[2] == 0xFF) && (buf[3] == 0xFF))) {
 			nvt_stop_crc_reboot();
 			continue;
 		}
@@ -1345,17 +1254,17 @@ static int8_t nvt_ts_check_chip_ver_trim(void)
 	}
 
 out:
-	LOG_DONE();
 	return ret;
 }
 
+
 /*******************************************************
 Description:
-Novatek touchscreen driver probe function.
+	Novatek touchscreen driver probe function.
 
 return:
-Executive outcomes. 0---succeed. negative---failed
- *******************************************************/
+	Executive outcomes. 0---succeed. negative---failed
+*******************************************************/
 static int32_t nvt_ts_probe(struct i2c_client *client, const struct i2c_device_id *id)
 {
 	int32_t ret = 0;
@@ -1363,11 +1272,10 @@ static int32_t nvt_ts_probe(struct i2c_client *client, const struct i2c_device_i
 	int32_t retry = 0;
 #endif
 
-	LOG_ENTRY();
 	NVT_LOG("start\n");
 
-	ts = kzalloc(sizeof(struct nvt_ts_data), GFP_KERNEL);
-	if (IS_ERR_OR_NULL(ts)) {
+	ts = kmalloc(sizeof(struct nvt_ts_data), GFP_KERNEL);
+	if (ts == NULL) {
 		NVT_ERR("failed to allocated memory for nvt ts data\n");
 		return -ENOMEM;
 	}
@@ -1394,8 +1302,29 @@ static int32_t nvt_ts_probe(struct i2c_client *client, const struct i2c_device_i
 
 
 	msleep(10);
+	
+    ts->vcc_i2c = regulator_get(&client->dev, "vcc_i2c-supply");
+    if (IS_ERR(ts->vcc_i2c))
+    {
+        ret = PTR_ERR(ts->vcc_i2c);
+        NVT_ERR("Regulator get failed vcc_i2c");
+    }
 
-	//---check chip version trim---
+    if (regulator_count_voltages(ts->vcc_i2c) > 0)
+    {
+        ret = regulator_set_voltage(ts->vcc_i2c, 1800000, 1800000);
+        if (ret)
+        {
+            NVT_ERR("Regulator set_vtg failed vcc_i2c ");
+        }
+    }
+    ret = regulator_enable(ts->vcc_i2c);
+    if (ret)
+    {
+        NVT_ERR("Regulator vcc_i2c enable failed");
+    }
+
+
 	ret = nvt_ts_check_chip_ver_trim();
 	if (ret) {
 		NVT_ERR("chip is not identified\n");
@@ -1404,7 +1333,6 @@ static int32_t nvt_ts_probe(struct i2c_client *client, const struct i2c_device_i
 	}
 
 	mutex_init(&ts->lock);
-	mutex_init(&ts->pm_mutex);
 
 	mutex_lock(&ts->lock);
 	nvt_bootloader_reset();
@@ -1413,14 +1341,14 @@ static int32_t nvt_ts_probe(struct i2c_client *client, const struct i2c_device_i
 	mutex_unlock(&ts->lock);
 
 
-	nvt_wq = create_workqueue("nvt_wq");
+	nvt_wq = alloc_workqueue("nvt_wq", WQ_FREEZABLE | WQ_HIGHPRI | WQ_UNBOUND, 0);
 	if (!nvt_wq) {
 		NVT_ERR("nvt_wq create workqueue failed\n");
 		ret = -ENOMEM;
 		goto err_create_nvt_wq_failed;
 	}
 	INIT_WORK(&ts->nvt_work, nvt_ts_work_func);
-	INIT_WORK(&g_nvt.nvt_usb_plugin_work, nvt_ts_usb_plugin_work_func);
+
 
 
 	ts->input_dev = input_allocate_device();
@@ -1451,9 +1379,8 @@ static int32_t nvt_ts_probe(struct i2c_client *client, const struct i2c_device_i
 	input_set_abs_params(ts->input_dev, ABS_MT_PRESSURE, 0, TOUCH_FORCE_NUM, 0, 0);
 
 #if TOUCH_MAX_FINGER_NUM > 1
-#if ENABLE_TOUCH_SZIE
 	input_set_abs_params(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);
-#endif
+
 	input_set_abs_params(ts->input_dev, ABS_MT_POSITION_X, 0, ts->abs_x_max-1, 0, 0);
 	input_set_abs_params(ts->input_dev, ABS_MT_POSITION_Y, 0, ts->abs_y_max-1, 0, 0);
 #if MT_PROTOCOL_B
@@ -1474,12 +1401,19 @@ static int32_t nvt_ts_probe(struct i2c_client *client, const struct i2c_device_i
 	for (retry = 0; retry < (sizeof(gesture_key_array) / sizeof(gesture_key_array[0])); retry++) {
 		input_set_capability(ts->input_dev, EV_KEY, gesture_key_array[retry]);
 	}
+
+	if(proc_create("wake_node", 0666, NULL, &nvt_gesture_fops) == NULL)
+		NVT_ERR("error while create gesture");
+	if(proc_create(NVT_GESTURE_NAME, 0666, NULL, &nvt_gesture_fops) == NULL)
+		NVT_ERR("error while create gesture");
+
 	wake_lock_init(&gestrue_wakelock, WAKE_LOCK_SUSPEND, "poll-wake-lock");
-    ret = tp_common_set_double_tap_ops(&double_tap_ops);
-    if (ret < 0) {
-        NVT_ERR("%s: Failed to create double_tap node err=%d\n",
-                __func__, ret);
-    }
+
+	ret = tp_common_set_double_tap_ops(&double_tap_ops);
+	if (ret < 0) {
+		NVT_ERR("%s: Failed to create double_tap node err=%d\n",
+			__func__, ret);
+	}
 #endif
 
 	sprintf(ts->phys, "input/ts");
@@ -1533,28 +1467,6 @@ static int32_t nvt_ts_probe(struct i2c_client *client, const struct i2c_device_i
 #endif /* #if NVT_TOUCH_ESD_PROTECT */
 
 
-
-#ifdef CONFIG_KERNEL_CUSTOM_FACTORY
-	ret = init_lct_tp_work(lct_tp_work_node_callback);
-	if (ret < 0) {
-		NVT_ERR("Failed to add /proc/tp_work node!\n");
-	}
-#endif
-
-	ret = init_lct_tp_gesture(lct_tp_gesture_node_callback);
-	if (ret < 0) {
-		NVT_ERR("Failed to add /proc/tp_work node!\n");
-	}
-
-	ret = init_lct_tp_grip_area(lct_tp_set_screen_angle_callback, lct_tp_get_screen_angle_callback);
-	if (ret < 0) {
-		NVT_ERR("Failed to add /proc/tp_grip_area node!\n");
-	}
-
-	/* add touchpad information by wanghan start */
-	lct_nvt_tp_info_node_init();
-	/* add touchpad information by wanghan end */
-
 #if NVT_TOUCH_PROC
 	ret = nvt_flash_proc_init();
 	if (ret != 0) {
@@ -1597,20 +1509,11 @@ static int32_t nvt_ts_probe(struct i2c_client *client, const struct i2c_device_i
 	}
 #endif
 
-	/* add resume work by wanghan start */
-	INIT_WORK(&g_resume_work, do_nvt_ts_resume_work);
-	/* add resume work by wanghan end */
-
 	bTouchIsAwake = 1;
 	NVT_LOG("end\n");
 
 	enable_irq(client->irq);
 
-
-	g_nvt.valid = true;
-	g_nvt.usb_plugin = false;
-
-	LOG_DONE();
 	return 0;
 
 #if defined(CONFIG_FB)
@@ -1637,22 +1540,20 @@ err_check_functionality_failed:
 err_gpio_config_failed:
 	i2c_set_clientdata(client, NULL);
 	kfree(ts);
-	LOG_DONE();
 	return ret;
 }
 
 /*******************************************************
 Description:
-Novatek touchscreen driver release function.
+	Novatek touchscreen driver release function.
 
 return:
-Executive outcomes. 0---succeed.
- *******************************************************/
+	Executive outcomes. 0---succeed.
+*******************************************************/
 static int32_t nvt_ts_remove(struct i2c_client *client)
 {
 
 
-	LOG_ENTRY();
 #if defined(CONFIG_FB)
 	if (fb_unregister_client(&ts->fb_notif))
 		NVT_ERR("Error occurred while unregistering fb_notifier.\n");
@@ -1660,12 +1561,7 @@ static int32_t nvt_ts_remove(struct i2c_client *client)
 	unregister_early_suspend(&ts->early_suspend);
 #endif
 
-	/* add resume work by wanghan start */
-	cancel_work_sync(&g_resume_work);
-	/* add resume work by wanghan end */
-
 	mutex_destroy(&ts->lock);
-	mutex_destroy(&ts->pm_mutex);
 
 	NVT_LOG("Removing driver...\n");
 
@@ -1674,17 +1570,16 @@ static int32_t nvt_ts_remove(struct i2c_client *client)
 	i2c_set_clientdata(client, NULL);
 	kfree(ts);
 
-	LOG_DONE();
 	return 0;
 }
 
 /*******************************************************
 Description:
-Novatek touchscreen driver suspend function.
+	Novatek touchscreen driver suspend function.
 
 return:
-Executive outcomes. 0---succeed.
- *******************************************************/
+	Executive outcomes. 0---succeed.
+*******************************************************/
 static int32_t nvt_ts_suspend(struct device *dev)
 {
 	uint8_t buf[4] = {0};
@@ -1692,7 +1587,6 @@ static int32_t nvt_ts_suspend(struct device *dev)
 	uint32_t i = 0;
 #endif
 
-	LOG_ENTRY();
 	if (!bTouchIsAwake) {
 		NVT_LOG("Touch is already suspend\n");
 		return 0;
@@ -1711,35 +1605,33 @@ static int32_t nvt_ts_suspend(struct device *dev)
 
 	if (enable_gesture_mode) {
 
-		buf[0] = EVENT_MAP_HOST_CMD;
-		buf[1] = 0x13;
+	buf[0] = EVENT_MAP_HOST_CMD;
+	buf[1] = 0x13;
 #if 0
-		buf[2] = 0xFF;
-		buf[3] = 0xFF;
-		CTP_I2C_WRITE(ts->client, I2C_FW_Address, buf, 4);
+	buf[2] = 0xFF;
+	buf[3] = 0xFF;
+	CTP_I2C_WRITE(ts->client, I2C_FW_Address, buf, 4);
 #else
-		CTP_I2C_WRITE(ts->client, I2C_FW_Address, buf, 2);
+	CTP_I2C_WRITE(ts->client, I2C_FW_Address, buf, 2);
 #endif
 
-		enable_irq_wake(ts->client->irq);
+	enable_irq_wake(ts->client->irq);
 
-		NVT_LOG("Enabled touch wakeup gesture\n");
+	NVT_LOG("Enabled touch wakeup gesture\n");
 	} else {
-		disable_irq(ts->client->irq);
+	disable_irq(ts->client->irq);
 
 
-		buf[0] = EVENT_MAP_HOST_CMD;
-		buf[1] = 0x11;
-		CTP_I2C_WRITE(ts->client, I2C_FW_Address, buf, 2);
+	buf[0] = EVENT_MAP_HOST_CMD;
+	buf[1] = 0x11;
+	CTP_I2C_WRITE(ts->client, I2C_FW_Address, buf, 2);
 	}
 
 	/* release all touches */
 #if MT_PROTOCOL_B
 	for (i = 0; i < ts->max_touch_num; i++) {
 		input_mt_slot(ts->input_dev, i);
-#if ENABLE_TOUCH_SZIE
 		input_report_abs(ts->input_dev, ABS_MT_TOUCH_MAJOR, 0);
-#endif
 		input_report_abs(ts->input_dev, ABS_MT_PRESSURE, 0);
 		input_mt_report_slot_state(ts->input_dev, MT_TOOL_FINGER, 0);
 	}
@@ -1757,20 +1649,18 @@ static int32_t nvt_ts_suspend(struct device *dev)
 
 	NVT_LOG("end\n");
 
-	LOG_DONE();
 	return 0;
 }
 
 /*******************************************************
 Description:
-Novatek touchscreen driver resume function.
+	Novatek touchscreen driver resume function.
 
 return:
-Executive outcomes. 0---succeed.
- *******************************************************/
+	Executive outcomes. 0---succeed.
+*******************************************************/
 static int32_t nvt_ts_resume(struct device *dev)
 {
-	LOG_ENTRY();
 	if (bTouchIsAwake) {
 		NVT_LOG("Touch is already resume\n");
 		return 0;
@@ -1787,17 +1677,17 @@ static int32_t nvt_ts_resume(struct device *dev)
 	nvt_bootloader_reset();
 	nvt_check_fw_reset_state(RESET_STATE_REK);
 
-	if (delay_gesture) {
-		enable_gesture_mode = !enable_gesture_mode;
-	}
+if (delay_gesture) {
+	enable_gesture_mode = !enable_gesture_mode;
+}
 
-	if (!enable_gesture_mode) {
-		enable_irq(ts->client->irq);
-	}
+if (!enable_gesture_mode) {
+	enable_irq(ts->client->irq);
+}
 
-	if (delay_gesture) {
-		enable_gesture_mode = !enable_gesture_mode;
-	}
+if (delay_gesture) {
+	enable_gesture_mode = !enable_gesture_mode;
+}
 
 #if NVT_TOUCH_ESD_PROTECT
 	queue_delayed_work(nvt_esd_check_wq, &nvt_esd_check_work,
@@ -1810,161 +1700,11 @@ static int32_t nvt_ts_resume(struct device *dev)
 	suspend_state = false;
 	delay_gesture = false;
 
-	if (g_nvt.usb_plugin)
-		nvt_ts_usb_plugin_work_func(NULL);
-
 	NVT_LOG("end\n");
 
-	LOG_DONE();
 	return 0;
 }
 
-/* add resume work by wanghan start */
-static void do_nvt_ts_resume_work(struct work_struct *work)
-{
-	int ret = 0;
-	LOG_ENTRY();
-	mutex_lock(&ts->pm_mutex);
-	ret = nvt_ts_resume(&ts->client->dev);
-	if (ret < 0)
-		NVT_ERR("nvt_ts_resume faild! ret=%d\n", ret);
-	mutex_unlock(&ts->pm_mutex);
-	LOG_DONE();
-	return;
-}
-/* add resume work by wanghan end */
-
-#ifdef CONFIG_KERNEL_CUSTOM_FACTORY
-static int lct_tp_work_node_callback(bool flag)
-{
-	int ret = 0;
-
-	LOG_ENTRY();
-	if (enable_gesture_mode) {
-		LOGV("ERROR: novatek gesture=%d!\n", enable_gesture_mode);
-		return -1;
-	}
-	if (suspend_state) return 0;
-	if (flag) {
-		suspend_state = true;
-		ret = nvt_ts_resume(&ts->client->dev);
-		if (ret < 0) NVT_ERR("nvt_ts_resume faild! ret=%d\n", ret);
-	} else {
-		ret = nvt_ts_suspend(&ts->client->dev);
-		if (ret < 0) NVT_ERR("nvt_ts_suspend faild! ret=%d\n", ret);
-	}
-	suspend_state = false;
-
-	LOG_DONE();
-	return ret;
-}
-#endif
-
-static int lct_tp_gesture_node_callback(bool flag)
-{
-	int retval = 0;
-
-	LOG_ENTRY();
-	if (suspend_state) {
-		LOGV("ERROR: TP is suspend!\n");
-		return -1;
-	}
-	if(flag) {
-		enable_gesture_mode = true;
-		LOGV("enable gesture mode\n");
-	} else {
-		enable_gesture_mode = false;
-		LOGV("disable gesture mode\n");
-	}
-	LOG_DONE();
-	return retval;
-}
-
-static int lct_tp_get_screen_angle_callback(void)
-{
-	uint8_t tmp[8] = {0};
-	int32_t ret = -EIO;
-	uint8_t edge_reject_switch;
-
-	if ( !bTouchIsAwake || (ts->touch_state != TOUCH_STATE_WORKING) ) {
-		NVT_ERR("tp is suspended or flashing, can not to set\n");
-		return ret;
-	}
-
-	NVT_LOG("++\n");
-
-	mutex_lock(&ts->lock);
-
-	msleep(35);
-
-	tmp[0] = 0xFF;
-	tmp[1] = (ts->mmap->EVENT_BUF_ADDR >> 16) & 0xFF;
-	tmp[2] = (ts->mmap->EVENT_BUF_ADDR >> 8) & 0xFF;
-	ret = CTP_I2C_WRITE(ts->client, I2C_FW_Address, tmp, 3);
-	if (ret < 0) {
-		NVT_ERR("Set event buffer index fail!\n");
-		goto out;
-	}
-
-	tmp[0] = 0x5C;
-	tmp[1] = 0x00;
-	ret = CTP_I2C_READ(ts->client, I2C_FW_Address, tmp, 2);
-	if (ret < 0) {
-		NVT_ERR("Read edge reject switch status fail!\n");
-		goto out;
-	}
-
-	edge_reject_switch = ((tmp[1] >> 5) & 0x03);
-	NVT_LOG("edge_reject_switch = %d\n", edge_reject_switch);
-	ret = edge_reject_switch;
-
-out:
-	mutex_unlock(&ts->lock);
-	NVT_LOG("--\n");
-	return ret;
-}
-static int lct_tp_set_screen_angle_callback(unsigned int angle)
-{
-	uint8_t tmp[3];
-	int ret = -EIO;
-
-	if ( !bTouchIsAwake || (ts->touch_state != TOUCH_STATE_WORKING) ) {
-		NVT_ERR("tp is suspended or flashing, can not to set\n");
-		return ret;
-	}
-
-	NVT_LOG("++\n");
-
-	mutex_lock(&ts->lock);
-
-	tmp[0] = 0XFF;
-	tmp[1] = (ts->mmap->EVENT_BUF_ADDR >> 16) & 0xFF;
-	tmp[2] = (ts->mmap->EVENT_BUF_ADDR >> 8) & 0xFF;
-	ret = CTP_I2C_WRITE(ts->client, I2C_FW_Address, tmp, 3);
-	if (ret < 0) {
-		NVT_LOG("i2c wite error!\n");
-		goto out;
-	}
-	tmp[0] = EVENT_MAP_HOST_CMD;
-	if (angle == 90) {
-		tmp[1] = 0xBC;
-	} else if (angle == 270) {
-		tmp[1] = 0xBB;
-	} else {
-		tmp[1] = 0xBA;
-	}
-	ret = CTP_I2C_WRITE(ts->client, I2C_FW_Address, tmp, 2);
-	if (ret < 0) {
-		NVT_LOG("i2c read error!\n");
-		goto out;
-	}
-	ret = 0;
-
-out:
-	mutex_unlock(&ts->lock);
-	NVT_LOG("--\n");
-	return ret;
-}
 
 #if defined(CONFIG_FB)
 static int fb_notifier_callback(struct notifier_block *self, unsigned long event, void *data)
@@ -1974,66 +1714,43 @@ static int fb_notifier_callback(struct notifier_block *self, unsigned long event
 	struct nvt_ts_data *ts =
 		container_of(self, struct nvt_ts_data, fb_notif);
 
-	LOG_ENTRY();
 	if (evdata && evdata->data && event == FB_EARLY_EVENT_BLANK) {
 		blank = evdata->data;
 		if (*blank == FB_BLANK_POWERDOWN) {
-			NVT_LOG("touch suspend\n");
-#ifdef CONFIG_KERNEL_CUSTOM_FACTORY
-			if (!get_lct_tp_work_status()) {
-				suspend_state = true;
-				return 0;
-			}
-#endif
-			flush_work(&g_resume_work);
-			mutex_lock(&ts->pm_mutex);
 			nvt_ts_suspend(&ts->client->dev);
-			mutex_unlock(&ts->pm_mutex);
 		}
 	} else if (evdata && evdata->data && event == FB_EVENT_BLANK) {
 		blank = evdata->data;
 		if (*blank == FB_BLANK_UNBLANK) {
-			NVT_LOG("touch resume\n");
-#ifdef CONFIG_KERNEL_CUSTOM_FACTORY
-			if (!get_lct_tp_work_status()) {
-				suspend_state = false;
-				return 0;
-			}
-#endif
-			schedule_work(&g_resume_work);
+			nvt_ts_resume(&ts->client->dev);
 		}
 	}
 
-	LOG_DONE();
 	return 0;
 }
 #elif defined(CONFIG_HAS_EARLYSUSPEND)
 /*******************************************************
 Description:
-Novatek touchscreen driver early suspend function.
+	Novatek touchscreen driver early suspend function.
 
 return:
-n.a.
- *******************************************************/
+	n.a.
+*******************************************************/
 static void nvt_ts_early_suspend(struct early_suspend *h)
 {
-	LOG_ENTRY();
 	nvt_ts_suspend(ts->client, PMSG_SUSPEND);
-	LOG_DONE();
 }
 
 /*******************************************************
 Description:
-Novatek touchscreen driver late resume function.
+	Novatek touchscreen driver late resume function.
 
 return:
-n.a.
- *******************************************************/
+	n.a.
+*******************************************************/
 static void nvt_ts_late_resume(struct early_suspend *h)
 {
-	LOG_ENTRY();
 	nvt_ts_resume(ts->client);
-	LOG_DONE();
 }
 #endif
 
@@ -2056,12 +1773,12 @@ static struct of_device_id nvt_match_table[] = {
 };
 #endif
 /*
-   static struct i2c_board_info __initdata nvt_i2c_boardinfo[] = {
-   {
-   I2C_BOARD_INFO(NVT_I2C_NAME, I2C_FW_Address),
-   },
-   };
-   */
+static struct i2c_board_info __initdata nvt_i2c_boardinfo[] = {
+	{
+		I2C_BOARD_INFO(NVT_I2C_NAME, I2C_FW_Address),
+	},
+};
+*/
 
 static struct i2c_driver nvt_i2c_driver = {
 	.probe		= nvt_ts_probe,
@@ -2083,80 +1800,40 @@ static struct i2c_driver nvt_i2c_driver = {
 	},
 };
 
-
-#define DOES_NOT_SUPPORT_SHUTDOWN_CHARGING
-
-#ifdef DOES_NOT_SUPPORT_SHUTDOWN_CHARGING
-extern char *saved_command_line;
-#endif
-
 /*******************************************************
 Description:
-Driver Install function.
+	Driver Install function.
 
 return:
-Executive Outcomes. 0---succeed. not 0---failed.
- ********************************************************/
+	Executive Outcomes. 0---succeed. not 0---failed.
+********************************************************/
 static int32_t __init nvt_driver_init(void)
 {
 	int32_t ret = 0;
 
-	LOG_ENTRY();
 	NVT_LOG("start\n");
-
-
-	g_nvt.valid = false;
-
-#ifdef DOES_NOT_SUPPORT_SHUTDOWN_CHARGING
-	if (strstr(saved_command_line, "androidboot.mode=charger") != NULL) {
-		LOGV("androidboot.mode=charger, TP doesn't support!\n");
-		goto err;
-	}
-#endif
-
-
-	if (IS_ERR_OR_NULL(g_lcd_id)){
-		NVT_ERR("g_lcd_id is ERROR!\n");
-		goto err;
-	} else {
-		if (strstr(g_lcd_id, "tianma nt36672a") != NULL) {
-			NVT_LOG("TP info: [Vendor]tianma [IC]nt36672a\n");
-		} else if (strstr(g_lcd_id, "shenchao nt36672a") != NULL) {
-			NVT_LOG("TP info: [Vendor]shenchao [IC] nt36672a\n");
-		} else {
-			NVT_ERR("Touch IC is not nt36672a\n");
-			goto err;
-		}
-	}
-
 
 	ret = i2c_add_driver(&nvt_i2c_driver);
 	if (ret) {
 		pr_err("%s: failed to add i2c driver", __func__);
-		goto err;
+		goto err_driver;
 	}
 
 	pr_info("%s: finished\n", __func__);
-	goto exit;
 
-err:
-	ret = -ENODEV;
-exit:
-	LOG_DONE();
+err_driver:
 	return ret;
 }
 
 /*******************************************************
 Description:
-Driver uninstall function.
+	Driver uninstall function.
 
 return:
-n.a.
- ********************************************************/
+	n.a.
+********************************************************/
 static void __exit nvt_driver_exit(void)
 {
-	LOG_ENTRY();
-	NVT_LOG("exit tp driver ...\n");
 	i2c_del_driver(&nvt_i2c_driver);
 
 	if (nvt_wq)
@@ -2171,7 +1848,6 @@ static void __exit nvt_driver_exit(void)
 	if (nvt_esd_check_wq)
 		destroy_workqueue(nvt_esd_check_wq);
 #endif /* #if NVT_TOUCH_ESD_PROTECT */
-	LOG_DONE();
 }
 
 

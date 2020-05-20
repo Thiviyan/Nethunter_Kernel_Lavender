@@ -100,11 +100,31 @@ obj-$(CONFIG_TOUCHSCREEN_ZFORCE)	+= zforce_ts.o
 obj-$(CONFIG_TOUCHSCREEN_COLIBRI_VF50)	+= colibri-vf50-ts.o
 obj-$(CONFIG_TOUCHSCREEN_ROHM_BU21023)	+= rohm_bu21023.o
 obj-$(CONFIG_TOUCHSCREEN_ST)		+= st/
-
+# HMI_L8867_A01
+obj-$(CONFIG_KERNEL_CUSTOM_D2S)	+= lct_tp_fm_info.o
+obj-$(CONFIG_KERNEL_CUSTOM_D2S)	+= lct_ctp_selftest.o
+obj-$(CONFIG_KERNEL_CUSTOM_D2S)	+= lct_ctp_upgrade.o
+obj-$(CONFIG_KERNEL_CUSTOM_D2S)	+= lct_if_ctp_upgrade.o
+obj-$(CONFIG_KERNEL_CUSTOM_D2S)	+= tp_common.o
+# HMI_L6662_A01
+obj-$(CONFIG_KERNEL_CUSTOM_E7T)	+= lct_tp_fm_info.o
+obj-$(CONFIG_KERNEL_CUSTOM_E7T)	+= lct_ctp_selftest.o
+obj-$(CONFIG_KERNEL_CUSTOM_E7T)	+= lct_ctp_upgrade.o
+obj-$(CONFIG_KERNEL_CUSTOM_E7T)	+= lct_if_ctp_upgrade.o
+obj-$(CONFIG_KERNEL_CUSTOM_E7T)	+= tp_common.o
+# HMI_L6653_A01
+obj-$(CONFIG_TOUCHSCREEN_SYNAPTICS_DSX_E7S)	+= synaptics_dsx_e7s/
+obj-$(CONFIG_TOUCHSCREEN_NVT_E7S) 	+= nvt_touch_e7s/
+obj-$(CONFIG_KERNEL_CUSTOM_E7S)	+= lct_tp_fm_info.o
+obj-$(CONFIG_KERNEL_CUSTOM_E7S)	+= lct_ctp_selftest.o
+obj-$(CONFIG_KERNEL_CUSTOM_E7S)	+= lct_ctp_upgrade.o
+obj-$(CONFIG_KERNEL_CUSTOM_E7S)	+= lct_if_ctp_upgrade.o
+obj-$(CONFIG_KERNEL_CUSTOM_E7S)	+= lct_tp_gesture.o
+obj-$(CONFIG_KERNEL_CUSTOM_E7S)	+= tp_common.o
 # HMI_M6100_A01
 obj-$(CONFIG_KERNEL_CUSTOM_F7A)	+= lct_tp_selftest.o
 obj-$(CONFIG_KERNEL_CUSTOM_F7A)	+= lct_tp_info.o
 obj-$(CONFIG_KERNEL_CUSTOM_F7A)	+= lct_tp_work.o
 obj-$(CONFIG_KERNEL_CUSTOM_F7A)	+= lct_tp_gesture.o
 obj-$(CONFIG_KERNEL_CUSTOM_F7A)	+= lct_tp_grip_area.o
-
+obj-$(CONFIG_KERNEL_CUSTOM_F7A)	+= tp_common.o
