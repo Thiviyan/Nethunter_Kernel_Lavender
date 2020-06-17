@@ -51,6 +51,7 @@ Module.symvers
 /vmlinuz
 /System.map
 /Module.markers
+/out
 
 #
 # Debian directory (make deb-pkg)
@@ -116,3 +117,7 @@ all.config
 
 # fetched Android config fragments
 android/configs/android-*.cfg
+
+clang/
+
+AnyKernel/
